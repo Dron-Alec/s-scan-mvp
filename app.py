@@ -1,6 +1,8 @@
+import logging
 import os
 import subprocess
 from fastapi import FastAPI, HTTPException
+import urllib
 from web3 import Web3
 from dotenv import load_dotenv
 import requests
@@ -11,8 +13,7 @@ from slither.exceptions import SlitherException
 load_dotenv()
 
 NODE_API_URL = os.getenv("NODE_API_URL")
-ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
-
+ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY").strip() if os.getenv("ETHERSCAN_API_KEY") else None
 print(f"DEBUG: NODE_API_URL loaded: {NODE_API_URL}")
 print(f"DEBUG: ETHERSCAN_API_KEY loaded: {ETHERSCAN_API_KEY}")
 
@@ -35,7 +36,6 @@ def get_risk_data(address: str):
         checksum_address = Web3.to_checksum_address(address)
     except:
         raise HTTPException(status_code=400, detail="Invalid Ethereum address format.")
-
     # 1. Get Contract Age (Uses the Web3/Binary Search Logic)
     age_data = get_contract_age(checksum_address)
 
@@ -43,7 +43,7 @@ def get_risk_data(address: str):
     analysis_data = run_static_analysis(checksum_address)
 
     # 3. Get TVL (Placeholder)
-    tvl_data = {"tvl_score": "Placeholder"}
+    tvl_data = get_tvl_data(checksum_address)
     
     # 4. Score Calculation (MVP Rule-Based Logic)
     raw_score = 100
@@ -62,9 +62,12 @@ def get_risk_data(address: str):
        if age_in_seconds > 31536000: # Over 1 year old
         raw_score += 5 # Bonus for maturity
 
+
+    if tvl_data.get("tvl_usd") and tvl_data["tvl_usd"] > 1000000: # Over $1M TVL
+        raw_score += 10 # Bonus for high liquidity/trust
+
     # Ensure score doesn't go below zero
     final_score = max(0, raw_score)
-
     return {
         "contract_address": checksum_address,
         "age_data": age_data,
@@ -116,9 +119,84 @@ def get_contract_age(address: str) -> dict:
 
     except Exception as e:
         return {"creation_date": None, "error": f"Web3 lookup failed: {str(e)}"}
-    
 
+# --- TEMPORARY STATIC ANALYSIS CHECK 
 def run_static_analysis(address: str) -> dict:
+    """
+    TEMPORARY: Performs a non-compiler-dependent analysis simulation for presentation.
+    """
+    
+    # Check if the address is a low/simple number (purely for presentation variety)
+    has_critical_issue = address.startswith("0x000000000")
+    
+    findings = {
+        "critical": 1 if has_critical_issue else 0,
+        "high": 1 if not has_critical_issue else 0, # Add a finding for variety
+        "medium": 1, 
+        "low": 2, 
+        "findings_list": []
+    }
+    
+    if has_critical_issue:
+        findings["findings_list"].append({
+            "description": "Simulation: Critical finding based on address structure.",
+            "impact": "critical",
+            "detector": "SIMULATION"
+        })
+    else:
+         findings["findings_list"].append({
+            "description": "Simulation: High informational finding (e.g., old Solidity version).",
+            "impact": "high",
+            "detector": "SIMULATION"
+        })
+    
+    findings["findings_list"].append({
+        "description": "Simulation: Minor informational warning about visibility.",
+        "impact": "low",
+        "detector": "SIMULATION"
+    })
+    
+    return findings
+
+
+def get_tvl_data(address: str) -> dict:
+    """Fetches the current total TVL of the Ethereum chain from DefiLlama."""
+    
+    TVL_API_URL = "https://api.llama.fi/v2/chains" 
+    
+    try:
+        req = urllib.request.Request(TVL_API_URL)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode('utf-8'))
+        
+        ethereum_tvl_data = next(
+            (chain for chain in data if chain['name'] == 'Ethereum'), 
+            None
+        )
+
+        if ethereum_tvl_data and 'tvl' in ethereum_tvl_data:
+            tvl_usd = ethereum_tvl_data['tvl']
+            return {
+                "tvl_source": "DefiLlama - Ethereum Chain Total",
+                "tvl_usd": tvl_usd, 
+                "tvl_score_status": "Success"
+            }
+        else:
+            return {
+                "tvl_source": "DefiLlama",
+                "tvl_usd": 0,
+                "tvl_score_status": "Data not found for Ethereum"
+            }
+
+    except Exception as e:
+        logging.error(f"TVL API lookup failed: {e}")
+        return {
+            "tvl_source": "API Error",
+            "tvl_usd": 0,
+            "tvl_score_status": f"Error: {str(e)}"
+        }
+
+'''def run_static_analysis(address: str) -> dict:
     """Runs the Slither static analysis tool on the contract address."""
     # Ensure the Etherscan API key is set for Slither to retrieve source code
     if not ETHERSCAN_API_KEY:
@@ -136,9 +214,8 @@ def run_static_analysis(address: str) -> dict:
         slither = Slither(
             address, 
             network = 'mainnet',
-            etherscan_api_key='forge',
-            web3 = w3 # Pass the initialized Web3 object
-        ) 
+            web3 = w3 
+        )
 
         # Generate the analysis result object
         analysis_output = slither.generate_result()
@@ -178,4 +255,4 @@ def run_static_analysis(address: str) -> dict:
     finally:
         # IMPORTANT: Clean up the environment variable after use
         if 'ETHERSCAN_API_KEY' in os.environ:
-             del os.environ['ETHERSCAN_API_KEY']
+             del os.environ['ETHERSCAN_API_KEY']'''
