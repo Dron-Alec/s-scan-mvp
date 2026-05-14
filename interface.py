@@ -4,7 +4,7 @@ import json
 import urllib.request
 import streamlit as st
 import pandas as pd
-from fpdf import FPDF
+from fpdf import FPDF, XPos, YPos
 from web3 import Web3
 from dotenv import load_dotenv
 
@@ -206,72 +206,78 @@ def generate_pdf(data: dict) -> bytes:
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
+    NX, NY = XPos.LMARGIN, YPos.NEXT  # shorthand: move to left margin, next line
+
     pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 12, "Smart Contract Security Report", ln=True, align="C")
+    pdf.cell(0, 12, "Smart Contract Security Report", align="C", new_x=NX, new_y=NY)
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 6, f"Generated: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", ln=True, align="C")
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    pdf.cell(0, 6, f"Generated: {ts}", align="C", new_x=NX, new_y=NY)
     pdf.ln(4)
 
     pdf.set_fill_color(240, 240, 240)
     pdf.set_font("Helvetica", "", 9)
-    pdf.cell(0, 8, f"Contract: {data['contract_address']}", ln=True, fill=True)
+    pdf.cell(0, 8, f"Contract: {data['contract_address']}", fill=True, new_x=NX, new_y=NY)
     pdf.ln(4)
 
     r, g, b = (0, 150, 0) if score >= 85 else ((255, 140, 0) if score >= 60 else (200, 0, 0))
     pdf.set_text_color(r, g, b)
     pdf.set_font("Helvetica", "B", 42)
-    pdf.cell(0, 20, f"{score} / 100", ln=True, align="C")
+    pdf.cell(0, 20, f"{score} / 100", align="C", new_x=NX, new_y=NY)
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, "Security Score  (100 = safest)", ln=True, align="C")
+    pdf.cell(0, 6, "Security Score  (100 = safest)", align="C", new_x=NX, new_y=NY)
     pdf.ln(8)
 
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, "Key Metrics", ln=True)
-    pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y())
+    pdf.cell(0, 8, "Key Metrics", new_x=NX, new_y=NY)
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + 190, pdf.get_y())
     pdf.ln(2)
     for label, value in [
-        ("Creation Date",    age_display),
-        ("Creation Block",   f"{block_num:,}" if isinstance(block_num, int) else str(block_num)),
-        ("ETH Held",         f"{eth_balance:,.4f} ETH" if eth_balance is not None else "N/A"),
-        ("ETH Value (USD)",  f"${tvl_usd:,.2f}"),
+        ("Creation Date",   age_display),
+        ("Creation Block",  f"{block_num:,}" if isinstance(block_num, int) else str(block_num)),
+        ("ETH Held",        f"{eth_balance:,.4f} ETH" if eth_balance is not None else "N/A"),
+        ("ETH Value (USD)", f"${tvl_usd:,.2f}"),
     ]:
         pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(55, 7, label + ":", ln=False)
+        pdf.cell(55, 7, label + ":", new_x=XPos.RIGHT, new_y=YPos.TOP)
         pdf.set_font("Helvetica", "", 10)
-        pdf.cell(0, 7, sanitize(str(value)), ln=True)
+        pdf.cell(0, 7, sanitize(str(value)), new_x=NX, new_y=NY)
     pdf.ln(6)
 
     source_label = sanitize(analysis.get("source", "Security Analysis"))
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, f"Vulnerability Findings ({source_label})", ln=True)
-    pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y())
+    pdf.cell(0, 8, f"Vulnerability Findings ({source_label})", new_x=NX, new_y=NY)
+    pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + 190, pdf.get_y())
     pdf.ln(2)
 
     if analysis.get("error"):
         pdf.set_font("Helvetica", "", 10)
+        pdf.set_x(pdf.l_margin)
         pdf.multi_cell(0, 6, sanitize(f"Note: {analysis['error']}"))
     else:
         pdf.set_fill_color(220, 220, 220)
         pdf.set_font("Helvetica", "B", 10)
-        pdf.cell(80, 8, "Impact", border=1, fill=True)
-        pdf.cell(30, 8, "Count", border=1, fill=True, ln=True)
+        pdf.cell(80, 8, "Impact", border=1, fill=True, new_x=XPos.RIGHT, new_y=YPos.TOP)
+        pdf.cell(30, 8, "Count",  border=1, fill=True, new_x=NX, new_y=NY)
         pdf.set_font("Helvetica", "", 10)
         for impact, key in [("Critical", "critical"), ("High", "high"), ("Medium", "medium"), ("Low", "low")]:
-            pdf.cell(80, 7, impact, border=1)
-            pdf.cell(30, 7, str(analysis.get(key, 0)), border=1, ln=True)
+            pdf.cell(80, 7, impact,                        border=1, new_x=XPos.RIGHT, new_y=YPos.TOP)
+            pdf.cell(30, 7, str(analysis.get(key, 0)),    border=1, new_x=NX, new_y=NY)
         pdf.ln(6)
 
         findings = analysis.get("findings_list", [])
         if findings:
             pdf.set_font("Helvetica", "B", 12)
-            pdf.cell(0, 8, "Detailed Findings", ln=True)
-            pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y())
+            pdf.cell(0, 8, "Detailed Findings", new_x=NX, new_y=NY)
+            pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + 190, pdf.get_y())
             pdf.ln(2)
             for i, f in enumerate(findings, 1):
                 pdf.set_font("Helvetica", "B", 10)
+                pdf.set_x(pdf.l_margin)
                 pdf.multi_cell(0, 6, sanitize(f"{i}. [{f.get('impact','').upper()}] {f.get('detector','')}"))
                 pdf.set_font("Helvetica", "", 9)
+                pdf.set_x(pdf.l_margin)
                 pdf.multi_cell(0, 5, sanitize(f.get("description", "")))
                 pdf.ln(3)
 
@@ -352,7 +358,7 @@ if st.button("Analyze Contract"):
                 }))
                 findings_list = analysis.get("findings_list", [])
                 if findings_list:
-                    st.dataframe(pd.DataFrame(findings_list), use_container_width=True)
+                    st.dataframe(pd.DataFrame(findings_list), width="stretch")
                 else:
                     st.info("No vulnerabilities detected.")
 
