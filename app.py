@@ -45,21 +45,12 @@ def get_risk_data(address: str):
         raw_score -= int(analysis_data.get("high", 0) * 15)
         raw_score -= int(analysis_data.get("medium", 0) * 5)
 
-    if w3 and age_data.get("creation_date") is not None:
-        current_timestamp = w3.eth.get_block("latest").timestamp
-        age_in_seconds = current_timestamp - age_data["creation_date"]
-        if age_in_seconds > 31_536_000:
-            raw_score += 5
-
-    if tvl_data.get("tvl_usd", 0) > 1_000_000:
-        raw_score += 10
-
     return {
         "contract_address": checksum_address,
         "age_data": age_data,
         "tvl_data": tvl_data,
         "analysis_data": analysis_data,
-        "final_score": min(100, max(0, raw_score)),
+        "final_score": max(0, raw_score),
     }
 
 

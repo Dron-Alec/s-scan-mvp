@@ -145,16 +145,7 @@ def compute_score(age_data: dict, analysis_data: dict, tvl_data: dict) -> int:
         raw -= analysis_data.get("critical", 0) * 25
         raw -= analysis_data.get("high", 0) * 15
         raw -= analysis_data.get("medium", 0) * 5
-
-    w3 = init_web3()
-    if w3 and age_data.get("creation_date") is not None:
-        if w3.eth.get_block("latest").timestamp - age_data["creation_date"] > 31_536_000:
-            raw += 5
-
-    if tvl_data.get("tvl_usd", 0) > 1_000_000:
-        raw += 10
-
-    return min(100, max(0, raw))
+    return max(0, raw)
 
 
 def fetch_direct(address: str) -> dict:
@@ -220,7 +211,7 @@ def generate_pdf(data: dict) -> bytes:
     pdf.cell(0, 8, f"Contract: {data['contract_address']}", fill=True, new_x=NX, new_y=NY)
     pdf.ln(4)
 
-    r, g, b = (0, 150, 0) if score >= 85 else ((255, 140, 0) if score >= 60 else (200, 0, 0))
+    r, g, b = (0, 150, 0) if score == 100 else ((255, 140, 0) if score >= 60 else (200, 0, 0))
     pdf.set_text_color(r, g, b)
     pdf.set_font("Helvetica", "B", 42)
     pdf.cell(0, 20, f"{score} / 100", align="C", new_x=NX, new_y=NY)
@@ -314,14 +305,16 @@ if st.button("Analyze Contract"):
             st.subheader(f"Results for: `{data['contract_address']}`")
 
             score = data["final_score"]
-            score_color = "green" if score >= 85 else ("orange" if score >= 60 else "red")
+            score_color = "green" if score == 100 else ("orange" if score >= 60 else "red")
+            score_label = "No red flags detected" if score == 100 else f"{100 - score} points deducted for findings"
 
             st.markdown(
                 f"""
                 <div style='background-color:#f0f2f6;padding:20px;border-radius:10px;text-align:center;'>
                     <h2 style='color:#262730;'>SECURITY SCORE</h2>
                     <h1 style='color:{score_color};font-size:80px;'>{score} / 100</h1>
-                    <p style='color:#555;'>Higher is safer</p>
+                    <p style='color:#555;'>{score_label}</p>
+                    <p style='color:#aaa;font-size:12px;'>100 = no detectable red flags &nbsp;·&nbsp; a high score does not mean the contract is safe</p>
                 </div>
                 """,
                 unsafe_allow_html=True,
