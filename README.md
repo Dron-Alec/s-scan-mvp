@@ -10,7 +10,7 @@ Smart contract security risk analyzer. Enter an Ethereum contract address and ge
 | Contract age | Binary search on-chain via Alchemy | +5 if older than 1 year |
 | ETH held | Alchemy balance × CoinGecko price | +10 if >$1M |
 
-Final score is 0–100. Results can be exported as JSON.
+Final score is 0–100 (higher = safer). Results can be exported as a PDF report.
 
 ## Setup
 

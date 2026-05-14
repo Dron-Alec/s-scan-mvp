@@ -1,14 +1,15 @@
 import os
-import json
+import datetime
 import streamlit as st
 import requests
 import pandas as pd
+from fpdf import FPDF
 
 FASTAPI_BASE_URL = os.getenv("FASTAPI_BASE_URL", "http://127.0.0.1:8000/risk-score")
 DEFAULT_ADDRESS = "0x514910771AF9Ca6566aF840dFf83E8264EcF986CA"
 
 st.set_page_config(layout="wide")
-st.title("Smart Contract Security Risk Analyzer")
+st.title("Smart Contract Security Score Analyzer")
 st.markdown("---")
 
 address = st.text_input(
@@ -38,7 +39,113 @@ def fetch_analysis(addr):
         return None
 
 
-if st.button("Analyze Contract Risk"):
+def sanitize(text: str) -> str:
+    """Strip characters outside Latin-1 so fpdf core fonts don't error."""
+    return text.encode("latin-1", errors="replace").decode("latin-1")
+
+
+def generate_pdf(data: dict) -> bytes:
+    score = data["final_score"]
+    address = data["contract_address"]
+    analysis = data["analysis_data"]
+
+    age_ts = data["age_data"].get("creation_date")
+    age_display = pd.to_datetime(age_ts, unit="s").strftime("%Y-%m-%d") if age_ts else "N/A"
+    block_num = data["age_data"].get("block_number", "N/A")
+    eth_balance = data["tvl_data"].get("eth_balance")
+    tvl_usd = data["tvl_data"].get("tvl_usd", 0)
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    # Header
+    pdf.set_font("Helvetica", "B", 18)
+    pdf.cell(0, 12, "Smart Contract Security Report", ln=True, align="C")
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 6, f"Generated: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}", ln=True, align="C")
+    pdf.ln(4)
+
+    # Contract address
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_font("Helvetica", "", 9)
+    pdf.cell(0, 8, f"Contract: {address}", ln=True, fill=True)
+    pdf.ln(4)
+
+    # Score
+    r, g, b = (0, 150, 0) if score >= 85 else ((255, 140, 0) if score >= 60 else (200, 0, 0))
+    pdf.set_text_color(r, g, b)
+    pdf.set_font("Helvetica", "B", 42)
+    pdf.cell(0, 20, f"{score} / 100", ln=True, align="C")
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "", 10)
+    pdf.cell(0, 6, "Security Score  (100 = safest)", ln=True, align="C")
+    pdf.ln(8)
+
+    # Key metrics
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Key Metrics", ln=True)
+    pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y())
+    pdf.ln(2)
+
+    metrics = [
+        ("Creation Date", age_display),
+        ("Creation Block", f"{block_num:,}" if isinstance(block_num, int) else str(block_num)),
+        ("ETH Held", f"{eth_balance:,.4f} ETH" if eth_balance is not None else "N/A"),
+        ("ETH Value (USD)", f"${tvl_usd:,.2f}"),
+        ("TVL Source", data["tvl_data"].get("tvl_source", "N/A")),
+    ]
+    for label, value in metrics:
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(55, 7, label + ":", ln=False)
+        pdf.set_font("Helvetica", "", 10)
+        pdf.cell(0, 7, sanitize(str(value)), ln=True)
+    pdf.ln(6)
+
+    # Slither summary
+    pdf.set_font("Helvetica", "B", 12)
+    pdf.cell(0, 8, "Vulnerability Findings (Slither)", ln=True)
+    pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y())
+    pdf.ln(2)
+
+    if analysis.get("error"):
+        pdf.set_font("Helvetica", "", 10)
+        pdf.multi_cell(0, 6, sanitize(f"Analysis error: {analysis['error']}"))
+    else:
+        # Summary table
+        col_w = [80, 30]
+        pdf.set_fill_color(220, 220, 220)
+        pdf.set_font("Helvetica", "B", 10)
+        pdf.cell(col_w[0], 8, "Impact", border=1, fill=True)
+        pdf.cell(col_w[1], 8, "Count", border=1, fill=True, ln=True)
+
+        pdf.set_font("Helvetica", "", 10)
+        for impact, key in [("Critical", "critical"), ("High", "high"), ("Medium", "medium"), ("Low / Informational", "low")]:
+            pdf.cell(col_w[0], 7, impact, border=1)
+            pdf.cell(col_w[1], 7, str(analysis.get(key, 0)), border=1, ln=True)
+
+        pdf.ln(6)
+
+        findings = analysis.get("findings_list", [])
+        if findings:
+            pdf.set_font("Helvetica", "B", 12)
+            pdf.cell(0, 8, "Detailed Findings", ln=True)
+            pdf.line(pdf.get_x(), pdf.get_y(), pdf.get_x() + 190, pdf.get_y())
+            pdf.ln(2)
+
+            for i, f in enumerate(findings, 1):
+                impact_label = f.get("impact", "").upper()
+                detector = f.get("detector", "unknown")
+                pdf.set_font("Helvetica", "B", 10)
+                pdf.multi_cell(0, 6, sanitize(f"{i}. [{impact_label}] {detector}"))
+                pdf.set_font("Helvetica", "", 9)
+                pdf.multi_cell(0, 5, sanitize(f.get("description", "")))
+                pdf.ln(3)
+
+    return bytes(pdf.output())
+
+
+if st.button("Analyze Contract"):
     if address:
         with st.spinner(f"Analyzing {address} — Slither analysis may take 1-3 minutes..."):
             data = fetch_analysis(address)
@@ -52,8 +159,9 @@ if st.button("Analyze Contract Risk"):
                 st.markdown(
                     f"""
                     <div style='background-color:#f0f2f6;padding:20px;border-radius:10px;text-align:center;'>
-                        <h2 style='color:#262730;'>RISK SCORE</h2>
+                        <h2 style='color:#262730;'>SECURITY SCORE</h2>
                         <h1 style='color:{score_color};font-size:80px;'>{score} / 100</h1>
+                        <p style='color:#555;'>Higher is safer</p>
                     </div>
                     """,
                     unsafe_allow_html=True,
@@ -71,8 +179,8 @@ if st.button("Analyze Contract Risk"):
                     st.metric("Contract Creation Date", age_display)
                     st.metric("Creation Block", f"{block_num:,}" if isinstance(block_num, int) else block_num)
 
-                tvl_usd = data["tvl_data"].get("tvl_usd", 0)
                 eth_balance = data["tvl_data"].get("eth_balance")
+                tvl_usd = data["tvl_data"].get("tvl_usd", 0)
 
                 with col2:
                     st.metric("ETH Held by Contract", f"{eth_balance:,.4f} ETH" if eth_balance is not None else "N/A")
@@ -107,11 +215,12 @@ if st.button("Analyze Contract Risk"):
                         st.info("No vulnerabilities detected by Slither.")
 
                 st.markdown("---")
+                pdf_bytes = generate_pdf(data)
                 st.download_button(
-                    label="Export full report as JSON",
-                    data=json.dumps(data, indent=2),
-                    file_name=f"risk_report_{data['contract_address'][:10]}.json",
-                    mime="application/json",
+                    label="Export report as PDF",
+                    data=pdf_bytes,
+                    file_name=f"security_report_{data['contract_address'][:10]}.pdf",
+                    mime="application/pdf",
                 )
     else:
         st.warning("Please enter a contract address.")
