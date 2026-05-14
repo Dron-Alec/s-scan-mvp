@@ -35,11 +35,10 @@ def get_risk_data(address: str):
         raise HTTPException(status_code=400, detail="Invalid Ethereum address format.")
 
     age_data = get_contract_age(checksum_address)
-    analysis_data = run_static_analysis(checksum_address)
+    analysis_data = get_combined_analysis(checksum_address)
     tvl_data = get_tvl_data(checksum_address)
 
     raw_score = 100
-
     if not analysis_data.get("error"):
         raw_score -= int(analysis_data.get("critical", 0) * 25)
         raw_score -= int(analysis_data.get("high", 0) * 15)
@@ -84,7 +83,7 @@ def get_contract_age(address: str) -> dict:
         return {"creation_date": None, "error": f"Web3 lookup failed: {str(e)}"}
 
 
-def run_static_analysis(address: str) -> dict:
+def run_slither(address: str) -> dict:
     empty = {"critical": 0, "high": 0, "medium": 0, "low": 0, "findings_list": []}
 
     if not ETHERSCAN_API_KEY:
@@ -122,6 +121,7 @@ def run_static_analysis(address: str) -> dict:
                 "description": d.get("description", "").strip(),
                 "impact": impact,
                 "detector": d.get("check", "unknown"),
+                "source": "Slither",
             })
 
         return findings
@@ -136,13 +136,80 @@ def run_static_analysis(address: str) -> dict:
         return {**empty, "error": f"Analysis error: {str(e)}"}
 
 
+def run_goplus(address: str) -> dict:
+    empty = {"critical": 0, "high": 0, "medium": 0, "low": 0, "findings_list": []}
+    try:
+        url = f"https://api.gopluslabs.io/api/v1/token_security/1?contract_addresses={address.lower()}"
+        req = urllib.request.Request(url, headers={"User-Agent": "s-scan/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            data = json.loads(r.read().decode("utf-8"))
+
+        if data.get("code") != 1:
+            return {**empty, "error": f"GoPlus error: {data.get('message')}"}
+
+        result = data.get("result", {}).get(address.lower())
+        if not result:
+            return {**empty, "error": "Contract not in GoPlus database."}
+
+        findings = {**empty}
+        checks = [
+            ("is_honeypot",             "Honeypot: funds cannot be withdrawn",       "critical", False),
+            ("selfdestruct",            "Contract has a self-destruct function",      "critical", False),
+            ("can_take_back_ownership", "Owner can reclaim contract ownership",       "high",     False),
+            ("hidden_owner",            "Contract has a hidden owner",               "high",     False),
+            ("is_open_source",          "Source code is not verified/open source",   "high",     True),
+            ("transfer_pausable",       "Owner can pause all transfers",             "medium",   False),
+            ("is_mintable",             "Owner can mint unlimited tokens",           "medium",   False),
+            ("is_proxy",                "Proxy contract (upgradeable)",              "medium",   False),
+            ("is_blacklisted",          "Contract uses a blacklist",                 "low",      False),
+            ("is_whitelisted",          "Contract uses a whitelist",                 "low",      False),
+        ]
+
+        for flag, description, impact, inverted in checks:
+            val = result.get(flag, "0")
+            is_bad = (val == "0") if inverted else (val == "1")
+            if is_bad:
+                findings[impact] += 1
+                findings["findings_list"].append({
+                    "description": description,
+                    "impact": impact,
+                    "detector": flag,
+                    "source": "GoPlus",
+                })
+
+        return findings
+
+    except Exception as e:
+        return {**empty, "error": str(e)}
+
+
+def get_combined_analysis(address: str) -> dict:
+    slither = run_slither(address)
+    goplus = run_goplus(address)
+
+    combined = {
+        "critical": slither.get("critical", 0) + goplus.get("critical", 0),
+        "high":     slither.get("high", 0)     + goplus.get("high", 0),
+        "medium":   slither.get("medium", 0)   + goplus.get("medium", 0),
+        "low":      slither.get("low", 0)      + goplus.get("low", 0),
+        "findings_list": slither.get("findings_list", []) + goplus.get("findings_list", []),
+        "source": "Slither + GoPlus",
+    }
+
+    if slither.get("error"):
+        combined["slither_error"] = slither["error"]
+    if goplus.get("error"):
+        combined["goplus_error"] = goplus["error"]
+
+    return combined
+
+
 def get_tvl_data(address: str) -> dict:
     if not w3 or not w3.is_connected():
         return {
             "tvl_source": "N/A",
             "tvl_usd": 0,
             "eth_balance": None,
-            "protocol_name": None,
             "tvl_score_status": "Web3 not connected.",
         }
 
@@ -159,7 +226,6 @@ def get_tvl_data(address: str) -> dict:
             "tvl_source": "Alchemy (balance) × CoinGecko (price)",
             "tvl_usd": eth_balance * eth_price,
             "eth_balance": eth_balance,
-            "protocol_name": None,
             "tvl_score_status": "success",
         }
 
@@ -169,6 +235,5 @@ def get_tvl_data(address: str) -> dict:
             "tvl_source": "API Error",
             "tvl_usd": 0,
             "eth_balance": None,
-            "protocol_name": None,
             "tvl_score_status": f"Error: {str(e)}",
         }

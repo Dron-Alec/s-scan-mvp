@@ -22,4 +22,5 @@ COPY .env* ./
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Use $PORT if set (Railway), otherwise default to 8000 (local/Docker)
+CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}"]
