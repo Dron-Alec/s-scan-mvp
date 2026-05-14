@@ -1,14 +1,28 @@
 # s-scan-mvp
 
-Smart contract security score analyzer. Enter an Ethereum contract address and get a scored report combining security analysis, on-chain age, and ETH balance. Final score is 0–100 (higher = safer). Export as PDF.
+Smart contract security score analyzer. Enter an Ethereum contract address and get a scored report combining security analysis, on-chain age, ETH balance, and transaction activity. Final score is 0–100 (higher = safer, 100 = no detectable red flags).
+
+![s-scan UI screenshot](docs/screenshot.png)
+<!-- Add a screenshot to docs/screenshot.png to display here -->
 
 ## How it works
 
 | Signal | Source | Score impact |
 |---|---|---|
 | Vulnerability findings | GoPlus (Streamlit Cloud) or Slither (Docker) | −25 critical, −15 high, −5 medium |
-| Contract age | Binary search on-chain via Alchemy | +5 if older than 1 year |
-| ETH held | Alchemy balance × CoinGecko price | +10 if >$1M |
+| Contract age | Binary search on-chain via Alchemy | display only |
+| ETH held | Alchemy balance × CoinGecko price | display only |
+| Transaction activity | Etherscan (last 30 days) | display only |
+
+## Test addresses
+
+| Address | Contract | What to expect |
+|---|---|---|
+| `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` | WETH | High ETH balance (~3M ETH), old (2017), few flags — good baseline |
+| `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDC | Proxy flag (upgradeable by Circle) |
+| `0x514910771AF9Ca6566aF840dFf83E8264EcF986CA` | LINK | Clean token, default address |
+| `0xdAC17F958D2ee523a2206206994597C13D831ec7` | USDT | Demonstrates ETH balance limitation — token contracts hold $0 ETH |
+| Any new/small ERC-20 | Unknown token | Most likely to surface real GoPlus flags (honeypot, mintable, hidden owner) |
 
 ## Deploying on Streamlit Community Cloud
 
@@ -22,28 +36,22 @@ Smart contract security score analyzer. Enter an Ethereum contract address and g
    ```
 5. Deploy
 
-On Streamlit Cloud, security analysis uses the **GoPlus Security API** (no native dependencies required). Contract age and ETH balance still use your Alchemy node.
+On Streamlit Cloud, security analysis uses the **GoPlus Security API** (no native dependencies required).
 
 ## Running with Docker (full Slither analysis)
 
 **Prerequisites:** Docker, Docker Compose
 
-1. Copy the env template and fill in your keys:
-   ```bash
-   cp .env.example .env
-   ```
+```bash
+cp .env.example .env   # fill in your keys
+docker-compose up --build
+```
 
-2. Build and run:
-   ```bash
-   docker-compose up --build
-   ```
+Open `http://localhost:8501`. The Docker setup runs both GoPlus and Slither and merges their findings. The FastAPI backend is also queryable directly at `http://localhost:8000/risk-score/{address}`.
 
-3. Open `http://localhost:8501`.
+## Known limitations
 
-In Docker mode, security analysis uses **Slither** (deeper analysis, 1–3 min per contract). The FastAPI backend is also available directly at `http://localhost:8000/risk-score/{address}`.
-
-## Notes
-
-- **GoPlus** only covers ERC-20 tokens. Protocol contracts, multisigs, etc. will show no security findings (score based on age and ETH balance only).
-- **Slither** requires the contract source to be verified on Etherscan.
-- ETH balance reflects native ETH only — ERC-20 tokens held by the contract are not counted.
+- **Score means absence of detected flags, not safety.** A score of 100 means no red flags were found — not that the contract is safe. Economic exploits, oracle manipulation, and logic bugs are outside the scope of this tool.
+- **GoPlus only covers ERC-20 tokens.** Protocol contracts, multisigs, and non-token contracts return no GoPlus data.
+- **ETH balance ≠ TVL for token contracts.** USDT, USDC, and most ERC-20s hold near-zero ETH — their value is tracked internally, not as ETH.
+- **Slither requires verified source code.** Contracts without Etherscan-verified source will fail Slither analysis but still score on GoPlus flags.

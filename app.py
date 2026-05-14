@@ -37,6 +37,7 @@ def get_risk_data(address: str):
     age_data = get_contract_age(checksum_address)
     analysis_data = get_combined_analysis(checksum_address)
     tvl_data = get_tvl_data(checksum_address)
+    tx_data = get_tx_data(checksum_address)
 
     raw_score = 100
     if not analysis_data.get("error"):
@@ -48,6 +49,7 @@ def get_risk_data(address: str):
         "contract_address": checksum_address,
         "age_data": age_data,
         "tvl_data": tvl_data,
+        "tx_data": tx_data,
         "analysis_data": analysis_data,
         "final_score": max(0, raw_score),
     }
@@ -202,6 +204,34 @@ def get_combined_analysis(address: str) -> dict:
         combined["goplus_error"] = goplus["error"]
 
     return combined
+
+
+def get_tx_data(address: str) -> dict:
+    """Fetch last 500 txs, count those in the last 30 days and return most recent timestamp."""
+    if not ETHERSCAN_API_KEY:
+        return {"tx_count_30d": "N/A", "last_active": None}
+    try:
+        import datetime as dt
+        url = (
+            f"https://api.etherscan.io/api?module=account&action=txlist"
+            f"&address={address}&page=1&offset=500&sort=desc&apikey={ETHERSCAN_API_KEY}"
+        )
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=15) as r:
+            data = json.loads(r.read().decode("utf-8"))
+
+        if data.get("status") != "1":
+            return {"tx_count_30d": "0", "last_active": None}
+
+        txs = data.get("result", [])
+        last_active = int(txs[0]["timeStamp"]) if txs else None
+        cutoff = dt.datetime.now(dt.timezone.utc).timestamp() - (30 * 24 * 3600)
+        count_30d = sum(1 for tx in txs if int(tx["timeStamp"]) >= cutoff)
+        count_display = f"{count_30d:,}+" if count_30d == 500 else f"{count_30d:,}"
+
+        return {"tx_count_30d": count_display, "last_active": last_active}
+    except Exception as e:
+        logger.error(f"TX data lookup failed: {e}")
+        return {"tx_count_30d": "N/A", "last_active": None, "error": str(e)}
 
 
 def get_tvl_data(address: str) -> dict:

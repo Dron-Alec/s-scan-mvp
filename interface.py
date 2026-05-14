@@ -25,6 +25,7 @@ def _secret(key):
 
 
 NODE_API_URL = _secret("NODE_API_URL")
+ETHERSCAN_API_KEY = (_secret("ETHERSCAN_API_KEY") or "").strip() or None
 FASTAPI_BASE_URL = _secret("FASTAPI_BASE_URL")  # set in Docker, absent on Streamlit Cloud
 DEFAULT_ADDRESS = "0x514910771AF9Ca6566aF840dFf83E8264EcF986CA"
 
@@ -139,6 +140,32 @@ def get_tvl_data(address: str) -> dict:
         return {"tvl_source": "Error", "tvl_usd": 0, "eth_balance": None, "tvl_score_status": str(e)}
 
 
+def get_tx_data(address: str) -> dict:
+    """Fetch last 500 txs from Etherscan, count those in the last 30 days."""
+    if not ETHERSCAN_API_KEY:
+        return {"tx_count_30d": "N/A", "last_active": None}
+    try:
+        url = (
+            f"https://api.etherscan.io/api?module=account&action=txlist"
+            f"&address={address}&page=1&offset=500&sort=desc&apikey={ETHERSCAN_API_KEY}"
+        )
+        with urllib.request.urlopen(urllib.request.Request(url), timeout=15) as r:
+            data = json.loads(r.read().decode("utf-8"))
+
+        if data.get("status") != "1":
+            return {"tx_count_30d": "0", "last_active": None}
+
+        txs = data.get("result", [])
+        last_active = int(txs[0]["timeStamp"]) if txs else None
+        cutoff = datetime.datetime.now(datetime.timezone.utc).timestamp() - (30 * 24 * 3600)
+        count_30d = sum(1 for tx in txs if int(tx["timeStamp"]) >= cutoff)
+        count_display = f"{count_30d:,}+" if count_30d == 500 else f"{count_30d:,}"
+
+        return {"tx_count_30d": count_display, "last_active": last_active}
+    except Exception as e:
+        return {"tx_count_30d": "N/A", "last_active": None, "error": str(e)}
+
+
 def compute_score(age_data: dict, analysis_data: dict, tvl_data: dict) -> int:
     raw = 100
     if not analysis_data.get("error"):
@@ -153,10 +180,12 @@ def fetch_direct(address: str) -> dict:
     age = get_contract_age(address)
     analysis = run_security_analysis(address)
     tvl = get_tvl_data(address)
+    tx = get_tx_data(address)
     return {
         "contract_address": address,
         "age_data": age,
         "tvl_data": tvl,
+        "tx_data": tx,
         "analysis_data": analysis,
         "final_score": compute_score(age, analysis, tvl),
     }
@@ -192,6 +221,12 @@ def generate_pdf(data: dict) -> bytes:
     block_num = data["age_data"].get("block_number", "N/A")
     eth_balance = data["tvl_data"].get("eth_balance")
     tvl_usd = data["tvl_data"].get("tvl_usd", 0)
+    tx = data.get("tx_data", {})
+    last_active_ts = tx.get("last_active")
+    last_active_display = (
+        pd.to_datetime(last_active_ts, unit="s").strftime("%Y-%m-%d")
+        if last_active_ts else "N/A"
+    )
 
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -225,10 +260,12 @@ def generate_pdf(data: dict) -> bytes:
     pdf.line(pdf.l_margin, pdf.get_y(), pdf.l_margin + 190, pdf.get_y())
     pdf.ln(2)
     for label, value in [
-        ("Creation Date",   age_display),
-        ("Creation Block",  f"{block_num:,}" if isinstance(block_num, int) else str(block_num)),
-        ("ETH Held",        f"{eth_balance:,.4f} ETH" if eth_balance is not None else "N/A"),
-        ("ETH Value (USD)", f"${tvl_usd:,.2f}"),
+        ("Creation Date",        age_display),
+        ("Creation Block",       f"{block_num:,}" if isinstance(block_num, int) else str(block_num)),
+        ("ETH Held",             f"{eth_balance:,.4f} ETH" if eth_balance is not None else "N/A"),
+        ("ETH Value (USD)",      f"${tvl_usd:,.2f}"),
+        ("Txns (last 30d)",      tx.get("tx_count_30d", "N/A")),
+        ("Last Active",          last_active_display),
     ]:
         pdf.set_font("Helvetica", "B", 10)
         pdf.cell(55, 7, label + ":", new_x=XPos.RIGHT, new_y=YPos.TOP)
@@ -339,9 +376,15 @@ if st.button("Analyze Contract"):
                 st.metric("ETH Value (USD)", f"${tvl_usd:,.2f}")
 
             analysis = data["analysis_data"]
+            tx = data.get("tx_data", {})
+            last_active_ts = tx.get("last_active")
+            last_active_display = (
+                pd.to_datetime(last_active_ts, unit="s").strftime("%Y-%m-%d")
+                if last_active_ts else "N/A"
+            )
             with col3:
-                st.metric("Critical findings", analysis.get("critical", 0))
-                st.metric("High findings", analysis.get("high", 0))
+                st.metric("Transactions (last 30d)", tx.get("tx_count_30d", "N/A"))
+                st.metric("Last Active", last_active_display)
 
             st.markdown("---")
             source_label = analysis.get("source", "Security Analysis")
