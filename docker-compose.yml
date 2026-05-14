@@ -1,0 +1,20 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: dockerfile
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+
+  interface:
+    build:
+      context: .
+      dockerfile: dockerfile.interface
+    ports:
+      - "8501:8501"
+    environment:
+      - FASTAPI_BASE_URL=http://api:8000/risk-score
+    depends_on:
+      - api
