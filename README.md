@@ -2,8 +2,8 @@
 
 Smart contract security score analyzer. Enter an Ethereum contract address and get a scored report combining security analysis, on-chain age, ETH balance, and transaction activity. Final score is 0–100 (higher = safer, 100 = no detectable red flags).
 
-![s-scan UI screenshot](docs/screenshot.png)
-<!-- Add a screenshot to docs/screenshot.png to display here -->
+<img width="1472" height="670" alt="Screenshot 2026-05-14 at 10 57 09 AM" src="https://github.com/user-attachments/assets/01cc9531-9d49-4c8f-8b65-38f5c1edbecf" />
+
 
 ## How it works
 
