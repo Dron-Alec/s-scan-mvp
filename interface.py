@@ -291,6 +291,14 @@ st.caption(
     "Mode: Docker backend (Slither)" if FASTAPI_BASE_URL
     else "Mode: Streamlit Cloud (GoPlus Security API)"
 )
+
+w3_status = init_web3()
+if not w3_status:
+    st.warning(
+        "Alchemy node not connected — ETH balance and contract age will be unavailable. "
+        "Set `NODE_API_URL` in your Streamlit secrets (Settings → Secrets)."
+    )
+
 st.markdown("---")
 
 address = st.text_input("Enter Ethereum Contract Address:", DEFAULT_ADDRESS)
