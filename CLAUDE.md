@@ -35,7 +35,7 @@ Secrets are read via `_secret(key)` which tries `st.secrets` first (Streamlit Cl
 
 **TVL** (`get_tvl_data`): native ETH balance via `w3.eth.get_balance(address)` × ETH/USD price from CoinGecko free API.
 
-**Scoring**: starts at 100, −25/−15/−5 per critical/high/medium finding, +5 if age >1 year, +10 if ETH balance >$1M. Clamped to [0, 100]. Higher = safer.
+**Scoring**: starts at 100, −25/−15/−5 per critical/high/medium finding, +5 if age >1 year, +10 if ETH balance >$1M. Clamped to [0, 100]. Higher = safer. If the scan returns no result (`analysis_data["error"]`), `final_score` is `None` and the UI/PDF show "NOT SCORED", never a clean 100.
 
 **PDF export** (`generate_pdf` in `interface.py`): fpdf2 with Helvetica. Text sanitized to Latin-1 before rendering.
 

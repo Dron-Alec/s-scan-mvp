@@ -39,20 +39,24 @@ def get_risk_data(address: str):
     tvl_data = get_tvl_data(checksum_address)
     tx_data = get_tx_data(checksum_address)
 
-    raw_score = 100
-    if not analysis_data.get("error"):
-        raw_score -= int(analysis_data.get("critical", 0) * 25)
-        raw_score -= int(analysis_data.get("high", 0) * 15)
-        raw_score -= int(analysis_data.get("medium", 0) * 5)
-
     return {
         "contract_address": checksum_address,
         "age_data": age_data,
         "tvl_data": tvl_data,
         "tx_data": tx_data,
         "analysis_data": analysis_data,
-        "final_score": max(0, raw_score),
+        "final_score": compute_score(analysis_data),
     }
+
+
+def compute_score(analysis_data: dict):
+    if analysis_data.get("error"):
+        return None  # no scan result — never report a failed scan as clean
+    raw_score = 100
+    raw_score -= int(analysis_data.get("critical", 0) * 25)
+    raw_score -= int(analysis_data.get("high", 0) * 15)
+    raw_score -= int(analysis_data.get("medium", 0) * 5)
+    return max(0, raw_score)
 
 
 def get_contract_age(address: str) -> dict:
@@ -202,6 +206,8 @@ def get_combined_analysis(address: str) -> dict:
         combined["slither_error"] = slither["error"]
     if goplus.get("error"):
         combined["goplus_error"] = goplus["error"]
+    if slither.get("error") and goplus.get("error"):
+        combined["error"] = "Neither Slither nor GoPlus returned a result."
 
     return combined
 

@@ -166,12 +166,13 @@ def get_tx_data(address: str) -> dict:
         return {"tx_count_30d": "N/A", "last_active": None, "error": str(e)}
 
 
-def compute_score(age_data: dict, analysis_data: dict, tvl_data: dict) -> int:
+def compute_score(age_data: dict, analysis_data: dict, tvl_data: dict):
+    if analysis_data.get("error"):
+        return None  # no scan result — never report a failed scan as clean
     raw = 100
-    if not analysis_data.get("error"):
-        raw -= analysis_data.get("critical", 0) * 25
-        raw -= analysis_data.get("high", 0) * 15
-        raw -= analysis_data.get("medium", 0) * 5
+    raw -= analysis_data.get("critical", 0) * 25
+    raw -= analysis_data.get("high", 0) * 15
+    raw -= analysis_data.get("medium", 0) * 5
     return max(0, raw)
 
 
@@ -246,13 +247,21 @@ def generate_pdf(data: dict) -> bytes:
     pdf.cell(0, 8, f"Contract: {data['contract_address']}", fill=True, new_x=NX, new_y=NY)
     pdf.ln(4)
 
-    r, g, b = (0, 150, 0) if score == 100 else ((255, 140, 0) if score >= 60 else (200, 0, 0))
+    if score is None:
+        r, g, b = (130, 130, 130)
+    else:
+        r, g, b = (0, 150, 0) if score == 100 else ((255, 140, 0) if score >= 60 else (200, 0, 0))
     pdf.set_text_color(r, g, b)
     pdf.set_font("Helvetica", "B", 42)
-    pdf.cell(0, 20, f"{score} / 100", align="C", new_x=NX, new_y=NY)
+    pdf.cell(0, 20, "NOT SCORED" if score is None else f"{score} / 100", align="C", new_x=NX, new_y=NY)
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("Helvetica", "", 10)
-    pdf.cell(0, 6, "Security Score  (100 = safest)", align="C", new_x=NX, new_y=NY)
+    pdf.cell(
+        0, 6,
+        "The scanner returned no data. This is not a clean result." if score is None
+        else "Security Score  (100 = safest)",
+        align="C", new_x=NX, new_y=NY,
+    )
     pdf.ln(8)
 
     pdf.set_font("Helvetica", "B", 12)
@@ -332,8 +341,12 @@ st.markdown("---")
 address = st.text_input("Enter Ethereum Contract Address:", DEFAULT_ADDRESS)
 
 if st.button("Analyze Contract"):
+    try:
+        address = Web3.to_checksum_address(address.strip())
+    except ValueError:
+        address = None
     if not address:
-        st.warning("Please enter a contract address.")
+        st.warning("Please enter a valid Ethereum contract address.")
     else:
         with st.spinner("Analyzing — this may take a minute..."):
             data = fetch_from_backend(address) if FASTAPI_BASE_URL else fetch_direct(address)
@@ -342,14 +355,19 @@ if st.button("Analyze Contract"):
             st.subheader(f"Results for: `{data['contract_address']}`")
 
             score = data["final_score"]
-            score_color = "green" if score == 100 else ("orange" if score >= 60 else "red")
-            score_label = "No red flags detected" if score == 100 else f"{100 - score} points deducted for findings"
+            if score is None:
+                score_color, score_text = "grey", "NOT SCORED"
+                score_label = "The scanner returned no data. This is not a clean result."
+            else:
+                score_color = "green" if score == 100 else ("orange" if score >= 60 else "red")
+                score_text = f"{score} / 100"
+                score_label = "No red flags detected" if score == 100 else f"{100 - score} points deducted for findings"
 
             st.markdown(
                 f"""
                 <div style='background-color:#f0f2f6;padding:20px;border-radius:10px;text-align:center;'>
                     <h2 style='color:#262730;'>SECURITY SCORE</h2>
-                    <h1 style='color:{score_color};font-size:80px;'>{score} / 100</h1>
+                    <h1 style='color:{score_color};font-size:80px;'>{score_text}</h1>
                     <p style='color:#555;'>{score_label}</p>
                     <p style='color:#aaa;font-size:12px;'>100 = no detectable red flags &nbsp;·&nbsp; a high score does not mean the contract is safe</p>
                 </div>
@@ -389,6 +407,10 @@ if st.button("Analyze Contract"):
             st.markdown("---")
             source_label = analysis.get("source", "Security Analysis")
             st.subheader(f"Vulnerability Findings ({source_label})")
+
+            for key in ("slither_error", "goplus_error"):  # Docker backend: per-scanner failures
+                if analysis.get(key):
+                    st.warning(f"{key.split('_')[0].title()} did not run: {analysis[key]}")
 
             if analysis.get("error"):
                 st.warning(f"Note: {analysis['error']}")
