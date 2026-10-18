@@ -15,6 +15,8 @@ Smart contract security score analyzer. Enter an Ethereum contract address and g
 | ETH held | Alchemy balance × CoinGecko price | display only |
 | Transaction activity | Etherscan (last 30 days) | display only |
 
+If the security scan returns no result (scanner error, or a contract GoPlus has no data for), the app shows a grey **NOT SCORED** instead of a score. A failed scan is never reported as a clean 100.
+
 ## Test addresses
 
 | Address | Contract | What to expect |
@@ -23,6 +25,7 @@ Smart contract security score analyzer. Enter an Ethereum contract address and g
 | `0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48` | USDC | Proxy flag (upgradeable by Circle) |
 | `0x514910771AF9Ca6566aF840dFf83E8264EcF986CA` | LINK | Clean token, default address |
 | `0xdAC17F958D2ee523a2206206994597C13D831ec7` | USDT | Demonstrates ETH balance limitation — token contracts hold $0 ETH |
+| `0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D` | Uniswap V2 Router | Non-token protocol contract — shows **NOT SCORED** on Streamlit Cloud (no GoPlus data) |
 | Any new/small ERC-20 | Unknown token | Most likely to surface real GoPlus flags (honeypot, mintable, hidden owner) |
 
 ## Deploying on Streamlit Community Cloud
@@ -53,6 +56,6 @@ Open `http://localhost:8501`. The Docker setup runs both GoPlus and Slither and 
 ## Known limitations
 
 - **Score means absence of detected flags, not safety.** A score of 100 means no red flags were found — not that the contract is safe. Economic exploits, oracle manipulation, and logic bugs are outside the scope of this tool.
-- **GoPlus only covers ERC-20 tokens.** Protocol contracts, multisigs, and non-token contracts return no GoPlus data.
+- **GoPlus only covers ERC-20 tokens.** Protocol contracts, multisigs, and non-token contracts return no GoPlus data, so on Streamlit Cloud they show **NOT SCORED**.
 - **ETH balance ≠ TVL for token contracts.** USDT, USDC, and most ERC-20s hold near-zero ETH — their value is tracked internally, not as ETH.
-- **Slither requires verified source code.** Contracts without Etherscan-verified source will fail Slither analysis but still score on GoPlus flags.
+- **Slither requires verified source code.** Contracts without Etherscan-verified source will fail Slither analysis but still score on GoPlus flags. If both scanners fail, the result is **NOT SCORED**.
